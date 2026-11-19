@@ -1,0 +1,423 @@
+
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="theme-color" content="#202d42">
+<title>Tarot Journal</title>
+<style>
+:root{--bg:#f5f2eb;--paper:#fffdf8;--ink:#292d36;--gold:#b18b50;--navy:#202d42;--line:#ded8ca;--muted:#777}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font-family:system-ui,-apple-system,"Noto Sans JP",sans-serif}
+header{background:var(--navy);color:#f5ead0;padding:24px 20px}
+header small{letter-spacing:2px;color:#d5bd8c}
+header h1{margin:5px 0;font-size:25px}
+header p{font-size:12px;margin:0;color:#ddd}
+main{max-width:760px;margin:auto;padding:16px}
+nav{display:flex;gap:8px;margin-bottom:16px}
+button{font:inherit;border:1px solid var(--line);background:var(--paper);color:var(--ink);padding:10px 14px;border-radius:9px;cursor:pointer}
+button.primary{background:var(--navy);color:white;border-color:var(--navy)}
+button:disabled{opacity:.45}
+.tab{flex:1}
+.tab.active{background:#e8ddc8;border-color:var(--gold);font-weight:bold}
+.panel{background:var(--paper);border:1px solid var(--line);border-radius:13px;padding:16px;margin-bottom:14px}
+label{display:block;font-size:13px;font-weight:650;margin:12px 0 6px}
+input,select,textarea{width:100%;font:inherit;padding:11px;border:1px solid var(--line);border-radius:8px;background:white;color:var(--ink)}
+textarea{min-height:80px;resize:vertical}
+.full{width:100%;margin-top:12px}
+.muted{color:var(--muted);font-size:12px}
+.hidden{display:none!important}
+.grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}
+.card{background:#fffdf8;border:1px solid var(--line);border-radius:10px;padding:12px 8px;text-align:center;min-height:100px;display:flex;flex-direction:column;justify-content:center;gap:6px}
+.card .name{font-weight:700;font-size:14px}
+.card .position{font-size:12px;color:var(--muted)}
+.card .orientation{font-size:12px;color:var(--gold)}
+.back{background:var(--navy);color:#ead9b5;border-color:var(--gold)}
+.progress{height:6px;background:var(--line);border-radius:10px;overflow:hidden;margin:12px 0}
+.progress div{height:100%;background:var(--gold);width:0;transition:width .2s}
+.history{padding:12px 0;border-bottom:1px solid var(--line);display:flex;justify-content:space-between;gap:8px;align-items:center}
+.history:last-child{border:0}
+.history button{white-space:nowrap}
+.actions{display:flex;gap:8px;flex-wrap:wrap;margin-top:12px}
+.actions button{flex:1}
+.status{font-size:12px;color:var(--muted);margin-top:8px;white-space:pre-wrap}
+@media(min-width:540px){.grid{grid-template-columns:repeat(3,minmax(0,1fr))}}
+</style>
+</head>
+<body>
+<header>
+<small>PERSONAL TAROT JOURNAL</small>
+<h1>TAROT JOURNAL</h1>
+<p>RIDER–WAITE–SMITH · 78 CARDS</p>
+</header>
+<main>
+<nav>
+<button class="tab active" id="tabNew">新しい占い</button>
+<button class="tab" id="tabHistory">履歴</button>
+</nav>
+
+<section id="newView">
+<div class="panel">
+<strong>リーディングの設定</strong>
+<label for="spread">スプレッド</label>
+<select id="spread">
+<option value="one">ワンオラクル（1枚）</option>
+<option value="three">スリーカード（3枚）</option>
+<option value="celtic">ケルト十字（10枚）</option>
+<option value="tree">生命の樹（10枚）</option>
+</select>
+<label for="question">占題・質問</label>
+<textarea id="question" placeholder="今回の問いを入力（空欄でも可）"></textarea>
+<button class="primary full" id="draw">シャッフルしてカードを引く</button>
+</div>
+
+<div id="progressPanel" class="panel hidden">
+<strong id="progressTitle">シャッフルしています</strong>
+<div class="progress"><div id="progressBar"></div></div>
+<div id="progressMessage" class="muted">カードを混ぜています……</div>
+<div id="backs" class="grid"></div>
+</div>
+
+<div id="reading" class="hidden">
+<div class="panel">
+<strong>ドロー結果</strong>
+<div id="cards" class="grid" style="margin-top:12px"></div>
+</div>
+<div class="panel">
+<strong>リーディングの記録</strong>
+<div id="notes"></div>
+<label for="summary">全体の総括</label>
+<textarea id="summary" placeholder="今回のリーディング全体をまとめる"></textarea>
+<button class="primary full" id="save">このリーディングを保存</button>
+<div id="saveStatus" class="status"></div>
+</div>
+</div>
+</section>
+
+<section id="historyView" class="hidden">
+<div class="panel">
+<strong>保存したリーディング</strong>
+<div class="actions">
+<button id="exportAll">全記録をバックアップ</button>
+<button id="importButton">バックアップを復元</button>
+<input type="file" id="importFile" accept=".json,application/json" class="hidden">
+</div>
+<div id="historyList" style="margin-top:12px"></div>
+</div>
+<div id="detail" class="panel hidden"></div>
+</section>
+<p class="muted" style="text-align:center">記録はこの端末のブラウザ内に保存されます。</p>
+</main>
+
+<script>
+(()=>{
+"use strict";
+const $=id=>document.getElementById(id);
+const KEY="tarot_journal_records_v1";
+
+const names=[
+"愚者","魔術師","女教皇","女帝","皇帝","教皇","恋人","戦車","力","隠者","運命の輪","正義","吊るされた男","死神","節制","悪魔","塔","星","月","太陽","審判","世界",
+"ワンドのエース","ワンドの2","ワンドの3","ワンドの4","ワンドの5","ワンドの6","ワンドの7","ワンドの8","ワンドの9","ワンドの10","ワンドのペイジ","ワンドのナイト","ワンドのクイーン","ワンドのキング",
+"カップのエース","カップの2","カップの3","カップの4","カップの5","カップの6","カップの7","カップの8","カップの9","カップの10","カップのペイジ","カップのナイト","カップのクイーン","カップのキング",
+"ソードのエース","ソードの2","ソードの3","ソードの4","ソードの5","ソードの6","ソードの7","ソードの8","ソードの9","ソードの10","ソードのペイジ","ソードのナイト","ソードのクイーン","ソードのキング",
+"ペンタクルのエース","ペンタクルの2","ペンタクルの3","ペンタクルの4","ペンタクルの5","ペンタクルの6","ペンタクルの7","ペンタクルの8","ペンタクルの9","ペンタクルの10","ペンタクルのペイジ","ペンタクルのナイト","ペンタクルのクイーン","ペンタクルのキング"
+];
+
+const spreads={
+one:{label:"ワンオラクル",positions:["カード"]},
+three:{label:"スリーカード",positions:["過去","現在","未来"]},
+celtic:{label:"ケルト十字",positions:["現状","障害・対立","顕在意識","潜在意識","過去","近い未来","本人の立場","周囲の状況","願望・恐れ","最終結果"]},
+tree:{label:"生命の樹",positions:["ケテル（王冠）","コクマー（知恵）","ビナー（理解）","ケセド（慈悲）","ゲブラー（峻厳）","ティファレト（美）","ネツァク（勝利）","ホド（栄光）","イェソド（基礎）","マルクト（王国）"]}
+};
+
+let records=[];
+let current=null;
+let busy=false;
+
+function load(){
+try{
+const data=JSON.parse(localStorage.getItem(KEY)||"[]");
+records=Array.isArray(data)?data:[];
+}catch(e){records=[];}
+}
+function persist(){
+try{
+localStorage.setItem(KEY,JSON.stringify(records));
+return true;
+}catch(e){return false;}
+}
+function escapeHTML(s){
+return String(s??"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+}
+function makeDraw(n){
+const pool=[];
+for(let i=0;i<78;i++){
+pool.push({card:i,reversed:false});
+pool.push({card:i,reversed:true});
+}
+for(let i=pool.length-1;i>0;i--){
+const j=Math.floor(Math.random()*(i+1));
+[pool[i],pool[j]]=[pool[j],pool[i]];
+}
+const result=[],seen=new Set();
+for(const item of pool){
+if(seen.has(item.card))continue;
+seen.add(item.card);
+result.push({...item});
+if(result.length===n)break;
+}
+return result;
+}
+function cardHTML(c,i){
+return `<div class="card">
+<div class="position">${i+1}. ${escapeHTML(c.position)}</div>
+<div class="name">${escapeHTML(names[c.card])}</div>
+<div class="orientation">${c.reversed?"逆位置":"正位置"}</div>
+</div>`;
+}
+const wait=ms=>new Promise(resolve=>setTimeout(resolve,ms));
+
+async function draw(){
+if(busy)return;
+busy=true;
+$("draw").disabled=true;
+$("draw").textContent="ドロー中……";
+$("reading").classList.add("hidden");
+$("progressPanel").classList.remove("hidden");
+
+const type=$("spread").value;
+const def=spreads[type];
+const selected=makeDraw(def.positions.length);
+
+current={
+id:null,
+date:new Date().toLocaleString("ja-JP"),
+spread:type,
+question:$("question").value,
+cards:selected.map((c,i)=>({...c,position:def.positions[i],note:""})),
+summary:""
+};
+
+$("cards").innerHTML="";
+$("backs").innerHTML=selected.map((c,i)=>
+`<div class="card back"><div class="position">${i+1}. ${escapeHTML(def.positions[i])}</div><div style="font-size:25px">✧</div><b>TAROT</b></div>`
+).join("");
+
+$("progressTitle").textContent="シャッフルしています";
+$("progressMessage").textContent="カードを混ぜています……";
+$("progressBar").style.width="0%";
+await wait(650);
+
+$("progressTitle").textContent="カードを引いています";
+for(let i=0;i<selected.length;i++){
+$("backs").children[i].outerHTML=cardHTML(current.cards[i],i);
+$("progressBar").style.width=((i+1)/selected.length*100)+"%";
+$("progressMessage").textContent=`${i+1}枚目のカードを引きました`;
+await wait(260);
+}
+$("progressTitle").textContent="ドロー完了";
+$("progressMessage").textContent="すべてのカードが揃いました。";
+$("cards").innerHTML=current.cards.map(cardHTML).join("");
+$("progressPanel").classList.add("hidden");
+$("reading").classList.remove("hidden");
+renderNotes();
+$("saveStatus").textContent="";
+busy=false;
+$("draw").disabled=false;
+$("draw").textContent="もう一度カードを引く";
+}
+
+function renderNotes(){
+$("notes").innerHTML=current.cards.map((c,i)=>`
+<div>
+<label>${i+1}. ${escapeHTML(c.position)} — ${escapeHTML(names[c.card])}（${c.reversed?"逆位置":"正位置"}）</label>
+<textarea data-note="${i}" placeholder="このカードについての解釈">${escapeHTML(c.note)}</textarea>
+</div>`).join("");
+$("notes").querySelectorAll("[data-note]").forEach(el=>{
+el.addEventListener("input",()=>{
+current.cards[Number(el.dataset.note)].note=el.value;
+});
+});
+$("summary").value=current.summary||"";
+}
+
+function save(){
+if(!current||busy)return;
+current.question=$("question").value;
+current.summary=$("summary").value;
+if(!current.id){
+current.id=Date.now().toString(36)+"-"+Math.random().toString(36).slice(2,8);
+records.unshift(JSON.parse(JSON.stringify(current)));
+}else{
+const i=records.findIndex(r=>r.id===current.id);
+if(i>=0)records[i]=JSON.parse(JSON.stringify(current));
+}
+$("saveStatus").textContent=persist()?"保存しました。履歴から確認できます。":"保存できませんでした。ブラウザの保存領域を確認してください。";
+}
+
+function readingText(r){
+const lines=[
+"【タロットリーディング】","",
+`日時：${r.date||"不明"}`,
+`スプレッド：${spreads[r.spread]?.label||r.spread||"不明"}`,
+"","【占題】",r.question||"（未入力）",""
+];
+r.cards.forEach((c,i)=>{
+lines.push(
+`【${i+1}. ${c.position||"配置不明"}】`,
+`${names[c.card]||"不明なカード"}・${c.reversed?"逆位置":"正位置"}`,
+`解釈：${c.note?.trim()||"（未記入）"}`,""
+);
+});
+lines.push("【全体の総括】",r.summary?.trim()||"（未記入）");
+return lines.join("\n");
+}
+
+async function copyText(text,status){
+try{
+if(navigator.clipboard&&window.isSecureContext){
+await navigator.clipboard.writeText(text);
+}else{
+const area=document.createElement("textarea");
+area.value=text;
+area.style.position="fixed";
+area.style.opacity="0";
+document.body.appendChild(area);
+area.select();
+const ok=document.execCommand("copy");
+area.remove();
+if(!ok)throw Error("copy failed");
+}
+status.textContent="コピーしました。貼り付けて利用できます。";
+}catch(e){
+status.textContent="自動コピーできませんでした。下の文章を長押ししてコピーしてください。";
+const area=document.createElement("textarea");
+area.value=text;
+area.readOnly=true;
+status.after(area);
+area.focus();
+area.select();
+}
+}
+
+function showTab(name){
+$("newView").classList.toggle("hidden",name!=="new");
+$("historyView").classList.toggle("hidden",name!=="history");
+$("tabNew").classList.toggle("active",name==="new");
+$("tabHistory").classList.toggle("active",name==="history");
+if(name==="history")renderHistory();
+}
+
+function renderHistory(){
+$("detail").classList.add("hidden");
+if(!records.length){
+$("historyList").innerHTML='<p class="muted">まだ記録はありません。</p>';
+return;
+}
+$("historyList").innerHTML=records.map((r,i)=>`
+<div class="history">
+<div style="min-width:0">
+<strong>${escapeHTML(r.question||"（占題なし）")}</strong>
+<div class="muted">${escapeHTML(r.date)} · ${escapeHTML(spreads[r.spread]?.label||r.spread)}</div>
+</div>
+<button data-open="${i}">開く</button>
+</div>`).join("");
+$("historyList").querySelectorAll("[data-open]").forEach(b=>{
+b.addEventListener("click",()=>showDetail(Number(b.dataset.open)));
+});
+}
+
+function showDetail(i){
+const r=records[i];
+if(!r)return;
+const d=$("detail");
+d.classList.remove("hidden");
+d.innerHTML=`
+<strong>保存したリーディング</strong>
+<p class="muted">${escapeHTML(r.date)} · ${escapeHTML(spreads[r.spread]?.label||r.spread)}</p>
+<label>占題</label>
+<textarea id="editQuestion">${escapeHTML(r.question)}</textarea>
+<div class="grid">
+${r.cards.map((c,j)=>cardHTML(c,j)).join("")}
+</div>
+${r.cards.map((c,j)=>`
+<label>${j+1}. ${escapeHTML(c.position)} — ${escapeHTML(names[c.card])}（${c.reversed?"逆位置":"正位置"}）</label>
+<textarea data-edit-note="${j}">${escapeHTML(c.note||"")}</textarea>
+`).join("")}
+<label>全体の総括</label>
+<textarea id="editSummary">${escapeHTML(r.summary||"")}</textarea>
+<button class="primary full" id="copyRecord">テキストをコピー</button>
+<div id="copyStatus" class="status"></div>
+<button class="full" id="updateRecord">変更を保存</button>
+<button class="full" id="deleteRecord">この記録を削除</button>
+`;
+$("copyRecord").onclick=()=>copyText(readingText(r),$("copyStatus"));
+$("updateRecord").onclick=()=>{
+r.question=$("editQuestion").value;
+r.summary=$("editSummary").value;
+d.querySelectorAll("[data-edit-note]").forEach(el=>{
+r.cards[Number(el.dataset.editNote)].note=el.value;
+});
+if(persist()){
+renderHistory();
+showDetail(records.findIndex(x=>x.id===r.id));
+}else{
+alert("保存できませんでした。");
+}
+};
+$("deleteRecord").onclick=()=>{
+if(!confirm("この記録を削除しますか？"))return;
+records=records.filter(x=>x.id!==r.id);
+persist();
+renderHistory();
+};
+}
+
+function exportAll(){
+const blob=new Blob([JSON.stringify(records,null,2)],{type:"application/json"});
+const url=URL.createObjectURL(blob);
+const a=document.createElement("a");
+a.href=url;
+a.download="tarot-journal-backup.json";
+a.click();
+URL.revokeObjectURL(url);
+}
+
+function importAll(file){
+const reader=new FileReader();
+reader.onload=()=>{
+try{
+const data=JSON.parse(reader.result);
+if(!Array.isArray(data))throw Error("invalid");
+const valid=data.every(r=>r&&Array.isArray(r.cards)&&typeof r.id==="string");
+if(!valid)throw Error("invalid");
+if(!confirm(`${data.length}件の記録を読み込みます。現在の記録に追加しますか？`))return;
+const ids=new Set(records.map(r=>r.id));
+data.forEach(r=>{if(!ids.has(r.id))records.push(r)});
+if(persist()){
+alert("バックアップを復元しました。");
+renderHistory();
+}else alert("保存できませんでした。");
+}catch(e){
+alert("バックアップファイルを読み込めませんでした。");
+}
+};
+reader.readAsText(file);
+}
+
+$("tabNew").onclick=()=>showTab("new");
+$("tabHistory").onclick=()=>showTab("history");
+$("draw").onclick=draw;
+$("save").onclick=save;
+$("exportAll").onclick=exportAll;
+$("importButton").onclick=()=>$("importFile").click();
+$("importFile").onchange=e=>{
+if(e.target.files[0])importAll(e.target.files[0]);
+e.target.value="";
+};
+load();
+})();
+</script>
+</body>
+</html>
